@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Workspace - Multi-Workspace Engine & Diagonal Drawing</title>
+    <title>3D Workspace - Front-Face Only Coloring in Parallel Snap Mode</title>
     
     <link rel="stylesheet" href="style.css">
 
@@ -50,7 +50,6 @@
             <div id="view-cube-container"></div>
         </div>
 
-        <!-- NEW HORIZONTAL WORKSPACE TAB CONTAINER -->
         <div class="tabs-bar" id="tabs-bar">
             <button id="btn-add-tab" title="Add New Empty 3D Space">+</button>
         </div>
@@ -196,7 +195,6 @@
             deselectObject();
             cancelLineTool();
 
-            // 1. Pack down variables for the current workspace before shifting out
             if (activeWorkspaceId !== null) {
                 const currentWs = workspaces.find(w => w.id === activeWorkspaceId);
                 if (currentWs) {
@@ -210,7 +208,6 @@
                 }
             }
 
-            // 2. Overwrite tracking variables with targeted workspace variables
             const targetWs = workspaces.find(w => w.id === id);
             if (targetWs) {
                 activeWorkspaceId = id;
@@ -455,23 +452,57 @@
         renderTabs();
 
         // ========================================================
-        // 2x4 COLOR PALETTE LOGIC
+        // 2x4 COLOR PALETTE & FRONT-FACE ONLY PARALLEL COLORING
         // ========================================================
         const paletteBoxes = document.querySelectorAll('.palette-box');
         let activePaletteBox = paletteBoxes[0];
+
+        // Helper function that selectively paints visible front faces when snapped parallel
+        function paintObjectColor(obj, newCol) {
+            if (obj.isCutter || !obj.geometry || !obj.geometry.attributes.color) return;
+            const geom = obj.geometry;
+            const colorAttr = geom.attributes.color;
+
+            // When locked to an orthogonal/parallel face, color ONLY the triangle facing camera
+            if (arcballControls.isLockedParallel && geom.index) {
+                const posAttr = geom.attributes.position;
+                const p1 = new THREE.Vector3(), p2 = new THREE.Vector3(), p3 = new THREE.Vector3();
+                const cb = new THREE.Vector3(), ab = new THREE.Vector3();
+                
+                const camDir = new THREE.Vector3();
+                camera.getWorldDirection(camDir);
+
+                for (let i = 0; i < geom.index.count; i += 3) {
+                    const a = geom.index.getX(i); const b = geom.index.getX(i+1); const c = geom.index.getX(i+2);
+                    p1.fromBufferAttribute(posAttr, a).applyMatrix4(obj.matrixWorld);
+                    p2.fromBufferAttribute(posAttr, b).applyMatrix4(obj.matrixWorld);
+                    p3.fromBufferAttribute(posAttr, c).applyMatrix4(obj.matrixWorld);
+
+                    cb.subVectors(p3, p2); ab.subVectors(p1, p2);
+                    const triWorldNormal = cb.cross(ab).normalize();
+
+                    // If triangle normal directly opposes camera view direction (pointing at camera)
+                    if (triWorldNormal.dot(camDir) < -0.85) {
+                        colorAttr.setXYZ(a, newCol.r, newCol.g, newCol.b);
+                        colorAttr.setXYZ(b, newCol.r, newCol.g, newCol.b);
+                        colorAttr.setXYZ(c, newCol.r, newCol.g, newCol.b);
+                    }
+                }
+            } else {
+                // Normal 3D orbit view: paint all vertices of the object
+                for (let i = 0; i < colorAttr.count; i++) {
+                    colorAttr.setXYZ(i, newCol.r, newCol.g, newCol.b);
+                }
+            }
+            colorAttr.needsUpdate = true;
+        }
 
         function applyColorToSelected(hexStr) {
             const newCol = new THREE.Color(hexStr);
             inpColor.value = hexStr;
             inpPaletteColor.value = hexStr;
             const targets = selectedMeshes.length > 0 ? selectedMeshes : (selectedObject && selectedObject !== selectionGroup ? [selectedObject] : []);
-            targets.forEach(obj => {
-                if (!obj.isCutter && obj.geometry && obj.geometry.attributes.color) {
-                    const colorAttr = obj.geometry.attributes.color;
-                    for (let i = 0; i < colorAttr.count; i++) colorAttr.setXYZ(i, newCol.r, newCol.g, newCol.b);
-                    colorAttr.needsUpdate = true;
-                }
-            });
+            targets.forEach(obj => paintObjectColor(obj, newCol));
             if (targets.length > 0) saveState();
         }
 
@@ -500,15 +531,9 @@
                 activePaletteBox.style.backgroundColor = hex;
                 activePaletteBox.dataset.color = hex;
             }
+            const newCol = new THREE.Color(hex);
             const targets = selectedMeshes.length > 0 ? selectedMeshes : (selectedObject && selectedObject !== selectionGroup ? [selectedObject] : []);
-            targets.forEach(obj => {
-                if (!obj.isCutter && obj.geometry && obj.geometry.attributes.color) {
-                    const newCol = new THREE.Color(hex);
-                    const colorAttr = obj.geometry.attributes.color;
-                    for (let i = 0; i < colorAttr.count; i++) colorAttr.setXYZ(i, newCol.r, newCol.g, newCol.b);
-                    colorAttr.needsUpdate = true;
-                }
-            });
+            targets.forEach(obj => paintObjectColor(obj, newCol));
         });
 
         inpColor.addEventListener('change', () => saveState());
@@ -1186,7 +1211,7 @@
 
         workspaceEl.addEventListener('pointerdown', (event) => {
             if (currentMode === 'draw-shape' && event.button === 0) {
-                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar') || event.target.closest('.tabs-bar')) return;
                 arcballControls.enabled = false;
                 
                 const rect = workspaceEl.getBoundingClientRect();
@@ -1238,7 +1263,7 @@
             }
 
             if (currentMode === 'select' && event.button === 0) {
-                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar') || event.target.closest('.tabs-bar')) return;
                 isMarqueeDragging = true; arcballControls.enabled = false;
                 const rect = workspaceEl.getBoundingClientRect();
                 marqueeStart.x = event.clientX - rect.left;
@@ -1252,7 +1277,7 @@
             }
 
             if (currentMode === 'pen') {
-                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar') || event.target.closest('.tabs-bar')) return;
                 isPenDrawing = true; penPoints = []; arcballControls.enabled = false; 
                 
                 const rect = workspaceEl.getBoundingClientRect(); mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1279,7 +1304,7 @@
         });
 
         workspaceEl.addEventListener('pointerup', (event) => {
-            if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+            if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar') || event.target.closest('.tabs-bar')) return;
 
             if (currentMode === 'draw-shape' && activeDrawingShape) {
                 arcballControls.enabled = true;
