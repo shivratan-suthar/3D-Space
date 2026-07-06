@@ -1,0 +1,1633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Workspace - Multi-Workspace Engine & Diagonal Drawing</title>
+    
+    <link rel="stylesheet" href="style.css">
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "three-mesh-bvh": "https://unpkg.com/three-mesh-bvh@0.7.3/build/index.module.js",
+                "three-bvh-csg": "https://unpkg.com/three-bvh-csg@0.0.18/build/index.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- CONTEXT MENU HTML -->
+    <div id="context-menu">
+        <div class="context-item" id="ctx-copy">Copy (Ctrl+C)</div>
+        <div class="context-item" id="ctx-paste">Paste (Ctrl+V)</div>
+        <div class="context-divider"></div>
+        <div class="context-item" id="ctx-delete" style="color:#f44336;">Delete (Del)</div>
+    </div>
+
+    <div class="app-container">
+        <div class="top-bar">
+            <div id="ui-wrapper">
+                <button class="history-btn" id="btn-undo" title="Undo (Ctrl+Z)">↩️</button>
+                <button class="history-btn" id="btn-redo" title="Redo (Ctrl+Y)">↪️</button>
+                <button class="history-btn" id="btn-face-snap" title="Snap Parallel to Closest of 6 Faces (Ctrl+F)">👁️</button>
+                <span id="no-selection-text">Tools:</span>
+                <div id="manipulation-tools">
+                    <button class="tool-btn active" id="btn-move">Move</button>
+                    <button class="tool-btn" id="btn-scale">Size</button>
+                    <button class="tool-btn" id="btn-rotate">Rotate</button>
+                    <button class="select-btn" id="btn-select">Select Box</button>
+                    <button class="pen-btn" id="btn-pen">3D Pen</button>
+                    <button class="paint-btn" id="btn-paint">Paint Face</button>
+                    <button class="special-btn" id="btn-xray">X-Ray</button>
+                    <button class="cutter-btn" id="btn-cutter">Make Cutter</button>
+                    <button class="danger-btn" id="btn-delete">Delete</button>
+                </div>
+            </div>
+            <div id="view-cube-container"></div>
+        </div>
+
+        <!-- NEW HORIZONTAL WORKSPACE TAB CONTAINER -->
+        <div class="tabs-bar" id="tabs-bar">
+            <button id="btn-add-tab" title="Add New Empty 3D Space">+</button>
+        </div>
+
+        <div id="properties-panel">
+            <div class="prop-group">
+                <span id="prop-label">Transform</span>
+                X <input type="text" id="inp-x" autocomplete="off">
+                Y <input type="text" id="inp-y" autocomplete="off">
+                Z <input type="text" id="inp-z" autocomplete="off">
+                <span style="color: #666; margin: 0 5px;">|</span>
+                All <input type="text" id="inp-all" autocomplete="off" placeholder="All">
+            </div>
+            <div class="prop-group">
+                <span style="font-weight: bold; color: #ff5722;">Pen Size</span>
+                <input type="number" id="inp-pen-size" value="0.2" step="0.1" min="0.05">
+            </div>
+            <div class="prop-group">
+                <span style="font-weight: bold; color: #fff;">Color</span>
+                <input type="color" id="inp-color">
+            </div>
+            <button id="btn-execute-cut">EXECUTE CUT</button>
+        </div>
+
+        <!-- MAIN BODY WITH VERTICAL LEFT SIDEBAR -->
+        <div class="main-body">
+            <div class="left-sidebar">
+                <button id="add-line" style="background-color: #ff9800;">+ 3D Line</button>
+                <button id="add-cube">+ Cube</button>
+                <button id="add-sphere">+ Sphere</button>
+                <button id="add-cone">+ Cone</button>
+                <button id="add-plane">+ Plane</button>
+                <button id="add-cylinder">+ Cylinder</button>
+                <div class="sidebar-divider"></div>
+                <input type="text" id="inp-text-str" placeholder="Text..." autocomplete="off">
+                <button id="add-text-btn" style="background-color: #673ab7;">+ Text</button>
+                
+                <div class="sidebar-divider"></div>
+                <span style="font-size: 11px; font-weight: bold; color: #aaa;">Palette</span>
+                <div id="palette-grid">
+                    <div class="palette-box active" style="background-color: #ff0000;" data-color="#ff0000"></div>
+                    <div class="palette-box" style="background-color: #00ff00;" data-color="#00ff00"></div>
+                    <div class="palette-box" style="background-color: #0088ff;" data-color="#0088ff"></div>
+                    <div class="palette-box" style="background-color: #ffff00;" data-color="#ffff00"></div>
+                    <div class="palette-box" style="background-color: #ff00ff;" data-color="#ff00ff"></div>
+                    <div class="palette-box" style="background-color: #00ffff;" data-color="#00ffff"></div>
+                    <div class="palette-box" style="background-color: #ffffff;" data-color="#ffffff"></div>
+                    <div class="palette-box" style="background-color: #ff8800;" data-color="#ff8800"></div>
+                </div>
+                <input type="color" id="inp-palette-color" title="Change selected color slot" value="#ff0000">
+            </div>
+            <div id="workspace">
+                <div id="selection-marquee"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN JAVASCRIPT -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+        import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+        import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+        import { Evaluator, Brush, SUBTRACTION } from 'three-bvh-csg';
+
+        THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+        THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+        THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+        const workspaceEl = document.getElementById('workspace');
+        const marqueeEl = document.getElementById('selection-marquee');
+        const tabsBarEl = document.getElementById('tabs-bar');
+        
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+
+        const gridHelper = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
+        scene.add(gridHelper);
+
+        const floorPlane = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshBasicMaterial({ visible: false }));
+        floorPlane.rotateX(-Math.PI / 2);
+        scene.add(floorPlane);
+
+        const camera = new THREE.PerspectiveCamera(50, workspaceEl.clientWidth / workspaceEl.clientHeight, 0.1, 1000);
+        camera.position.set(0, 5, 12);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(workspaceEl.clientWidth, workspaceEl.clientHeight);
+        renderer.autoClear = false; 
+        workspaceEl.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+
+        const selectionGroup = new THREE.Group();
+        scene.add(selectionGroup);
+
+        // ========================================================
+        // MULTI-WORKSPACE STATE ENGINE
+        // ========================================================
+        let workspaces = [];
+        let activeWorkspaceId = null;
+        let nextWorkspaceId = 1;
+
+        function createNewWorkspace() {
+            const id = nextWorkspaceId++;
+            const ws = {
+                id: id,
+                name: `Space ${workspaces.length + 1}`,
+                objects: [],
+                historyStack: [[]], 
+                historyIndex: 0,
+                cameraPosition: new THREE.Vector3(0, 5, 12),
+                cameraQuaternion: new THREE.Quaternion(0, 0, 0, 1),
+                target: new THREE.Vector3(0, 0, 0)
+            };
+            workspaces.push(ws);
+            renderTabs();
+            return ws;
+        }
+
+        function renderTabs() {
+            const tabElements = tabsBarEl.querySelectorAll('.tab');
+            tabElements.forEach(el => el.remove());
+            const btnAdd = document.getElementById('btn-add-tab');
+
+            workspaces.forEach(ws => {
+                const tab = document.createElement('div');
+                tab.className = `tab ${ws.id === activeWorkspaceId ? 'active' : ''}`;
+                tab.textContent = ws.name;
+                tab.addEventListener('click', () => switchWorkspace(ws.id));
+                tabsBarEl.insertBefore(tab, btnAdd);
+            });
+        }
+
+        function switchWorkspace(id) {
+            if (activeWorkspaceId === id) return;
+
+            deselectObject();
+            cancelLineTool();
+
+            // 1. Pack down variables for the current workspace before shifting out
+            if (activeWorkspaceId !== null) {
+                const currentWs = workspaces.find(w => w.id === activeWorkspaceId);
+                if (currentWs) {
+                    objectsArray.forEach(obj => scene.remove(obj));
+                    currentWs.objects = [...objectsArray];
+                    currentWs.historyStack = [...historyStack];
+                    currentWs.historyIndex = historyIndex;
+                    currentWs.cameraPosition.copy(camera.position);
+                    currentWs.cameraQuaternion.copy(camera.quaternion);
+                    currentWs.target.copy(arcballControls.target);
+                }
+            }
+
+            // 2. Overwrite tracking variables with targeted workspace variables
+            const targetWs = workspaces.find(w => w.id === id);
+            if (targetWs) {
+                activeWorkspaceId = id;
+                objectsArray.length = 0;
+                
+                targetWs.objects.forEach(obj => {
+                    scene.add(obj);
+                    objectsArray.push(obj);
+                });
+                
+                historyStack = [...targetWs.historyStack];
+                historyIndex = targetWs.historyIndex;
+                
+                camera.position.copy(targetWs.cameraPosition);
+                camera.quaternion.copy(targetWs.cameraQuaternion);
+                camera.up.set(0, 1, 0); 
+                arcballControls.target.copy(targetWs.target);
+                camera.lookAt(arcballControls.target);
+            }
+
+            renderTabs();
+        }
+
+        document.getElementById('btn-add-tab').onclick = () => {
+            const newWs = createNewWorkspace();
+            switchWorkspace(newWs.id);
+        };
+
+        // ========================================================
+        // TRUE QUATERNION ARCBALL NAVIGATION CONTROLLER
+        // ========================================================
+        class ArcballController {
+            constructor(camera, domElement) {
+                this.camera = camera;
+                this.domElement = domElement;
+                this.enabled = true;
+                this.isLockedParallel = false;
+
+                this.target = new THREE.Vector3(0, 0, 0);
+                this.rotateSpeed = 1.8;
+                this.panSpeed = 1.0;
+
+                this.state = -1; // 0: ROTATE, 1: PAN
+                this.shiftDown = false;
+                this.ctrlDown = false;
+                this.lastScreenVec = new THREE.Vector3();
+
+                this.initEvents();
+            }
+
+            projectOnBall(x, y) {
+                const rect = this.domElement.getBoundingClientRect();
+                const nx = ((x - rect.left) / rect.width) * 2 - 1;
+                const ny = -((y - rect.top) / rect.height) * 2 + 1;
+                const distSq = nx * nx + ny * ny;
+                
+                if (distSq <= 1.0) {
+                    return new THREE.Vector3(nx, ny, Math.sqrt(1.0 - distSq));
+                } else {
+                    const norm = 1.0 / Math.sqrt(distSq);
+                    return new THREE.Vector3(nx * norm, ny * norm, 0);
+                }
+            }
+
+            initEvents() {
+                window.addEventListener('keydown', (e) => { 
+                    if (e.key === 'Shift') this.shiftDown = true; 
+                    if (e.key === 'Control' || e.key === 'Meta') this.ctrlDown = true;
+                });
+                window.addEventListener('keyup', (e) => { 
+                    if (e.key === 'Shift') this.shiftDown = false; 
+                    if (e.key === 'Control' || e.key === 'Meta') this.ctrlDown = false;
+                });
+
+                this.domElement.addEventListener('pointerdown', (e) => {
+                    if (!this.enabled || e.target !== this.domElement && !this.domElement.contains(e.target)) return;
+                    
+                    const isPanModifier = this.shiftDown || this.ctrlDown || e.shiftKey || e.ctrlKey || e.metaKey;
+
+                    if (e.button === 0 && !isPanModifier) this.state = 0;
+                    else if (e.button === 1 || (e.button === 0 && isPanModifier) || e.button === 2) this.state = 1;
+                    
+                    this.lastScreenVec = this.projectOnBall(e.clientX, e.clientY);
+                });
+
+                window.addEventListener('pointerup', () => { this.state = -1; });
+
+                window.addEventListener('pointermove', (e) => {
+                    if (!this.enabled || this.state === -1) return;
+                    if (this.isLockedParallel && this.state === 0) return;
+
+                    const currScreenVec = this.projectOnBall(e.clientX, e.clientY);
+
+                    if (this.state === 0) {
+                        const angle = Math.acos(Math.min(1.0, this.lastScreenVec.dot(currScreenVec))) * this.rotateSpeed;
+                        if (angle > 0.0001) {
+                            const camAxis = new THREE.Vector3().crossVectors(this.lastScreenVec, currScreenVec).normalize();
+                            const worldAxis = camAxis.clone().transformDirection(this.camera.matrixWorld);
+
+                            const rotQuat = new THREE.Quaternion().setFromAxisAngle(worldAxis, angle);
+                            
+                            const offset = this.camera.position.clone().sub(this.target);
+                            offset.applyQuaternion(rotQuat);
+                            this.camera.position.copy(this.target).add(offset);
+
+                            this.camera.quaternion.premultiply(rotQuat);
+                            this.camera.quaternion.normalize();
+                        }
+                    }
+                    else if (this.state === 1) {
+                        const dx = e.movementX || 0;
+                        const dy = e.movementY || 0;
+                        const dist = this.camera.position.distanceTo(this.target);
+                        const panFactor = dist * 0.0015 * this.panSpeed;
+
+                        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+                        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+
+                        const panVec = new THREE.Vector3().addScaledVector(right, -dx * panFactor).addScaledVector(up, dy * panFactor);
+                        this.camera.position.add(panVec);
+                        this.target.add(panVec);
+                    }
+
+                    this.lastScreenVec = currScreenVec;
+                });
+
+                this.domElement.addEventListener('wheel', (e) => {
+                    if (!this.enabled) return;
+                    e.preventDefault();
+
+                    const rect = this.domElement.getBoundingClientRect();
+                    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                    const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+                    const zoomRaycaster = new THREE.Raycaster();
+                    zoomRaycaster.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
+
+                    let zoomTargetPoint = null;
+
+                    if (typeof objectsArray !== 'undefined' && objectsArray.length > 0) {
+                        const hits = zoomRaycaster.intersectObjects(objectsArray);
+                        if (hits.length > 0) {
+                            zoomTargetPoint = hits[0].point.clone();
+                        }
+                    }
+
+                    if (!zoomTargetPoint) {
+                        const camForward = new THREE.Vector3();
+                        this.camera.getWorldDirection(camForward);
+                        const focusPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(camForward.negate(), this.target);
+                        zoomTargetPoint = new THREE.Vector3();
+                        if (!zoomRaycaster.ray.intersectPlane(focusPlane, zoomTargetPoint)) {
+                            zoomTargetPoint = this.target.clone();
+                        }
+                    }
+
+                    const rayDir = zoomRaycaster.ray.direction.clone().normalize();
+                    const distToPoint = this.camera.position.distanceTo(zoomTargetPoint);
+                    const step = distToPoint * (e.deltaY > 0 ? -0.15 : 0.15);
+
+                    if (distToPoint - step > 0.1) {
+                        this.camera.position.addScaledVector(rayDir, step);
+                        this.target.addScaledVector(rayDir, step);
+                    }
+                }, { passive: false });
+
+                this.domElement.addEventListener('dblclick', (e) => {
+                    const rect = this.domElement.getBoundingClientRect();
+                    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                    raycaster.setFromCamera(mouse, this.camera);
+                    
+                    const hits = raycaster.intersectObjects(objectsArray);
+                    if (hits.length > 0) {
+                        const hitPt = hits[0].point;
+                        const offset = this.camera.position.clone().sub(this.target);
+                        this.target.copy(hitPt);
+                        this.camera.position.copy(hitPt).add(offset);
+                        ptMarker.position.copy(hitPt);
+                        ptMarker.visible = true;
+                        setTimeout(() => { if (!isDrawingLine) ptMarker.visible = false; }, 800);
+                    }
+                });
+            }
+        }
+
+        const arcballControls = new ArcballController(camera, renderer.domElement);
+        const transformControls = new TransformControls(camera, renderer.domElement);
+        scene.add(transformControls);
+
+        const cubeContainer = document.getElementById('view-cube-container');
+        const cubeScene = new THREE.Scene();
+        const cubeCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+        cubeCamera.position.set(0, 0, 4);
+        const cubeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        cubeRenderer.setSize(60, 60);
+        cubeContainer.appendChild(cubeRenderer.domElement);
+
+        const viewMaterials = [
+            new THREE.MeshBasicMaterial({ color: 0xff5555, transparent: true, opacity: 0.8 }), 
+            new THREE.MeshBasicMaterial({ color: 0xaa0000, transparent: true, opacity: 0.8 }), 
+            new THREE.MeshBasicMaterial({ color: 0x55ff55, transparent: true, opacity: 0.8 }), 
+            new THREE.MeshBasicMaterial({ color: 0x00aa00, transparent: true, opacity: 0.8 }), 
+            new THREE.MeshBasicMaterial({ color: 0x5555ff, transparent: true, opacity: 0.8 }), 
+            new THREE.MeshBasicMaterial({ color: 0x0000aa, transparent: true, opacity: 0.8 })  
+        ];
+        const viewCubeGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+        const viewCube = new THREE.Mesh(viewCubeGeo, viewMaterials);
+        viewCube.add(new THREE.LineSegments(new THREE.EdgesGeometry(viewCubeGeo), new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })));
+        viewCube.add(new THREE.AxesHelper(1.2));
+        cubeScene.add(viewCube);
+
+        const highlightBox = new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry()), 0x00ff00);
+        highlightBox.visible = false;
+        scene.add(highlightBox);
+
+        let currentMode = 'translate';
+        let isEditingInputs = false; 
+        let selectedObject = null;
+        let selectedMeshes = [];
+        const objectsArray = [];
+
+        const noSelectText = document.getElementById('no-selection-text');
+        const propertiesPanel = document.getElementById('properties-panel');
+        const inpX = document.getElementById('inp-x');
+        const inpY = document.getElementById('inp-y');
+        const inpZ = document.getElementById('inp-z');
+        const inpAll = document.getElementById('inp-all');
+        const inpColor = document.getElementById('inp-color');
+        const propLabel = document.getElementById('prop-label');
+        const inpPenSize = document.getElementById('inp-pen-size');
+        const inpPaletteColor = document.getElementById('inp-palette-color');
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Initialize First Space On Startup
+        const firstWS = createNewWorkspace();
+        activeWorkspaceId = firstWS.id;
+        let historyStack = [...firstWS.historyStack];
+        let historyIndex = firstWS.historyIndex;
+        renderTabs();
+
+        // ========================================================
+        // 2x4 COLOR PALETTE LOGIC
+        // ========================================================
+        const paletteBoxes = document.querySelectorAll('.palette-box');
+        let activePaletteBox = paletteBoxes[0];
+
+        function applyColorToSelected(hexStr) {
+            const newCol = new THREE.Color(hexStr);
+            inpColor.value = hexStr;
+            inpPaletteColor.value = hexStr;
+            const targets = selectedMeshes.length > 0 ? selectedMeshes : (selectedObject && selectedObject !== selectionGroup ? [selectedObject] : []);
+            targets.forEach(obj => {
+                if (!obj.isCutter && obj.geometry && obj.geometry.attributes.color) {
+                    const colorAttr = obj.geometry.attributes.color;
+                    for (let i = 0; i < colorAttr.count; i++) colorAttr.setXYZ(i, newCol.r, newCol.g, newCol.b);
+                    colorAttr.needsUpdate = true;
+                }
+            });
+            if (targets.length > 0) saveState();
+        }
+
+        paletteBoxes.forEach(box => {
+            box.addEventListener('click', () => {
+                paletteBoxes.forEach(b => b.classList.remove('active'));
+                box.classList.add('active');
+                activePaletteBox = box;
+                applyColorToSelected(box.dataset.color);
+            });
+        });
+
+        inpPaletteColor.addEventListener('input', (e) => {
+            const hex = e.target.value;
+            if (activePaletteBox) {
+                activePaletteBox.style.backgroundColor = hex;
+                activePaletteBox.dataset.color = hex;
+            }
+            applyColorToSelected(hex);
+        });
+
+        inpColor.addEventListener('input', (e) => {
+            const hex = e.target.value;
+            inpPaletteColor.value = hex;
+            if (activePaletteBox) {
+                activePaletteBox.style.backgroundColor = hex;
+                activePaletteBox.dataset.color = hex;
+            }
+            const targets = selectedMeshes.length > 0 ? selectedMeshes : (selectedObject && selectedObject !== selectionGroup ? [selectedObject] : []);
+            targets.forEach(obj => {
+                if (!obj.isCutter && obj.geometry && obj.geometry.attributes.color) {
+                    const newCol = new THREE.Color(hex);
+                    const colorAttr = obj.geometry.attributes.color;
+                    for (let i = 0; i < colorAttr.count; i++) colorAttr.setXYZ(i, newCol.r, newCol.g, newCol.b);
+                    colorAttr.needsUpdate = true;
+                }
+            });
+        });
+
+        inpColor.addEventListener('change', () => saveState());
+
+        // ========================================================
+        // HISTORY STATE ENGINE (Undo / Redo)
+        // ========================================================
+        function cloneSceneGraph(sourceArray) {
+            const objMap = new Map();
+            const clonedArray = [];
+
+            sourceArray.forEach(obj => {
+                const mesh = new THREE.Mesh(obj.geometry, obj.material.clone());
+                mesh.position.copy(obj.position);
+                mesh.quaternion.copy(obj.quaternion);
+                mesh.scale.copy(obj.scale);
+                mesh.is2D = obj.is2D;
+                mesh.isCutter = obj.isCutter;
+                
+                mesh.userData = { ...obj.userData }; 
+                if (obj.userData.connections) mesh.userData.connections = []; 
+                
+                objMap.set(obj, mesh);
+                clonedArray.push(mesh);
+            });
+
+            sourceArray.forEach(obj => {
+                const mesh = objMap.get(obj);
+                if (obj.userData.isHandle && obj.userData.connections) {
+                    obj.userData.connections.forEach(conn => {
+                        mesh.userData.connections.push({
+                            cylinder: objMap.get(conn.cylinder),
+                            sibling: objMap.get(conn.sibling)
+                        });
+                    });
+                } else if (obj.userData.isLine) {
+                    mesh.userData.h1 = objMap.get(obj.userData.h1);
+                    mesh.userData.h2 = objMap.get(obj.userData.h2);
+                }
+            });
+
+            return clonedArray;
+        }
+
+        function saveState() {
+            const currentChildren = [...selectionGroup.children];
+            currentChildren.forEach(child => scene.attach(child));
+
+            if (historyIndex < historyStack.length - 1) {
+                historyStack = historyStack.slice(0, historyIndex + 1);
+            }
+            const state = cloneSceneGraph(objectsArray);
+            historyStack.push(state);
+            historyIndex++;
+
+            currentChildren.forEach(child => selectionGroup.attach(child));
+        }
+
+        function restoreState(stateObjects) {
+            deselectObject();
+            cancelLineTool(); 
+            
+            objectsArray.forEach(obj => {
+                if (obj.parent) obj.parent.remove(obj);
+                else scene.remove(obj);
+            });
+            objectsArray.length = 0;
+
+            const restoredObjects = cloneSceneGraph(stateObjects);
+            restoredObjects.forEach(obj => {
+                scene.add(obj);
+                objectsArray.push(obj);
+            });
+        }
+
+        document.getElementById('btn-undo').onclick = () => {
+            if (historyIndex > 0) { historyIndex--; restoreState(historyStack[historyIndex]); }
+        };
+
+        document.getElementById('btn-redo').onclick = () => {
+            if (historyIndex < historyStack.length - 1) { historyIndex++; restoreState(historyStack[historyIndex]); }
+        };
+
+        // ========================================================
+        // COPY / PASTE & SMART RIGHT-CLICK MENU LOGIC
+        // ========================================================
+        let clipboardObj = null;
+        const contextMenu = document.getElementById('context-menu');
+        let pointerDownCtx = { x: 0, y: 0 };
+
+        workspaceEl.addEventListener('pointerdown', (e) => {
+            pointerDownCtx.x = e.clientX; pointerDownCtx.y = e.clientY;
+        });
+
+        workspaceEl.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const dist = Math.hypot(e.clientX - pointerDownCtx.x, e.clientY - pointerDownCtx.y);
+            if (dist > 5) return;
+
+            const rect = workspaceEl.getBoundingClientRect();
+            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1; 
+            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(objectsArray);
+
+            if (intersects.length > 0) selectObject(intersects[0].object);
+            
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = e.clientY + 'px';
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#context-menu')) contextMenu.style.display = 'none';
+        });
+
+        function performCopy() {
+            if (selectedObject && selectedObject !== selectionGroup) clipboardObj = selectedObject;
+        }
+
+        function performPaste() {
+            if (clipboardObj) {
+                const newMesh = new THREE.Mesh(clipboardObj.geometry, clipboardObj.material.clone());
+                newMesh.position.copy(clipboardObj.position).add(new THREE.Vector3(0.5, 0.5, 0.5));
+                newMesh.quaternion.copy(clipboardObj.quaternion);
+                newMesh.scale.copy(clipboardObj.scale);
+                newMesh.is2D = clipboardObj.is2D;
+                
+                newMesh.userData = { ...clipboardObj.userData };
+                delete newMesh.userData.isHandle; delete newMesh.userData.isLine;
+                delete newMesh.userData.connections; delete newMesh.userData.h1; delete newMesh.userData.h2;
+
+                scene.add(newMesh);
+                objectsArray.push(newMesh);
+                saveState();
+                selectObject(newMesh);
+            }
+        }
+
+        document.getElementById('ctx-copy').onclick = () => { performCopy(); contextMenu.style.display = 'none'; };
+        document.getElementById('ctx-paste').onclick = () => { performPaste(); contextMenu.style.display = 'none'; };
+        document.getElementById('ctx-delete').onclick = () => { document.getElementById('btn-delete').click(); contextMenu.style.display = 'none'; };
+
+        // ========================================================
+        // TRUE ALL 6-FACE PARALLEL SNAP ENGINE
+        // ========================================================
+        function getClosestViewNormal() {
+            const camToTarget = new THREE.Vector3().subVectors(arcballControls.target, camera.position).normalize();
+            const axes = [
+                new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+                new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+                new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)
+            ];
+            let maxDot = -Infinity; let closest = axes[4];
+            axes.forEach(a => { let d = camToTarget.dot(a); if(d > maxDot) { maxDot = d; closest = a; }});
+            return closest;
+        }
+
+        function getClosestViewAxisStr() {
+            const normal = getClosestViewNormal();
+            if (Math.abs(normal.x) > 0.5) return 'X';
+            if (Math.abs(normal.y) > 0.5) return 'Y';
+            return 'Z';
+        }
+
+        function snapCameraToClosestFace() {
+            const focus = arcballControls.target;
+            const dist = camera.position.distanceTo(focus);
+            
+            const camToTarget = new THREE.Vector3().subVectors(focus, camera.position).normalize();
+            const axes = [
+                new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+                new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+                new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)
+            ];
+            
+            let maxDot = -Infinity; let bestForward = axes[4];
+            axes.forEach(a => {
+                const d = camToTarget.dot(a);
+                if (d > maxDot) { maxDot = d; bestForward = a; }
+            });
+            
+            const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+            
+            let maxUpDot = -Infinity;
+            let bestUp = new THREE.Vector3(0, 1, 0);
+            if (Math.abs(bestForward.y) > 0.9) bestUp = new THREE.Vector3(0, 0, -bestForward.y);
+            
+            axes.forEach(a => {
+                if (Math.abs(a.dot(bestForward)) < 0.1) {
+                    const d = currentUp.dot(a);
+                    if (d > maxUpDot) { maxUpDot = d; bestUp = a; }
+                }
+            });
+            
+            camera.position.copy(focus).addScaledVector(bestForward, -dist);
+            camera.up.copy(bestUp);
+            camera.lookAt(focus);
+            
+            applyGizmoRestrictions(getClosestViewAxisStr());
+        }
+
+        function toggleParallelFaceSnap() {
+            const btnEye = document.getElementById('btn-face-snap');
+            if (!arcballControls.isLockedParallel) {
+                snapCameraToClosestFace();
+                arcballControls.isLockedParallel = true;
+                if (btnEye) btnEye.style.backgroundColor = "#008CBA";
+            } else {
+                arcballControls.isLockedParallel = false;
+                if (btnEye) btnEye.style.backgroundColor = "";
+            }
+            applyGizmoRestrictions(getClosestViewAxisStr());
+        }
+
+        document.getElementById('btn-face-snap').addEventListener('click', toggleParallelFaceSnap);
+
+        window.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'f' || e.key === 'F') {
+                    e.preventDefault();
+                    toggleParallelFaceSnap();
+                }
+                if (e.key === 'c' || e.key === 'C') performCopy();
+                if (e.key === 'v' || e.key === 'V') performPaste();
+                if (e.key === 'z' || e.key === 'Z') {
+                    if (e.shiftKey) document.getElementById('btn-redo').click();
+                    else document.getElementById('btn-undo').click();
+                }
+                if (e.key === 'y' || e.key === 'Y') document.getElementById('btn-redo').click();
+            }
+        });
+
+        function recenterPivotOnObject(mesh) {
+            if (!mesh) return;
+            arcballControls.target.copy(mesh.position);
+        }
+
+        function applyGizmoRestrictions(viewAxis) {
+            if (!selectedObject) return;
+            transformControls.showX = true; transformControls.showY = true; transformControls.showZ = true;
+            if (currentMode === 'translate' || currentMode === 'scale') {
+                if (viewAxis === 'X') transformControls.showX = false;
+                if (viewAxis === 'Y') transformControls.showY = false;
+                if (viewAxis === 'Z') transformControls.showZ = false;
+            } else if (currentMode === 'rotate') {
+                if (viewAxis === 'X') { transformControls.showY = false; transformControls.showZ = false; }
+                if (viewAxis === 'Y') { transformControls.showX = false; transformControls.showZ = false; }
+                if (viewAxis === 'Z') { transformControls.showX = false; transformControls.showY = false; }
+            }
+        }
+
+        function cleanGeometry(geom, overrideColor = null) {
+            if (!geom.index) {
+                const count = geom.attributes.position.count;
+                const indices = new Uint32Array(count);
+                for (let i = 0; i < count; i++) indices[i] = i;
+                geom.setIndex(new THREE.BufferAttribute(indices, 1));
+            }
+            if (!geom.attributes.color || overrideColor) {
+                const count = geom.attributes.position.count;
+                const colors = new Float32Array(count * 3);
+                const col = overrideColor || new THREE.Color(0xffffff);
+                for(let i=0; i<count; i++) { colors[i*3] = col.r; colors[i*3+1] = col.g; colors[i*3+2] = col.b; }
+                geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            }
+
+            const toDelete = [];
+            for (const key in geom.attributes) if (key !== 'position' && key !== 'normal' && key !== 'color' && key !== 'uv') toDelete.push(key);
+            toDelete.forEach(key => geom.deleteAttribute(key));
+            
+            if (!geom.attributes.normal) geom.computeVertexNormals();
+            if (!geom.attributes.uv) {
+                const count = geom.attributes.position.count;
+                geom.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+            }
+            return geom;
+        }
+
+        function updateCylinderNode(cyl, h1, h2) {
+            const p1 = h1.position; const p2 = h2.position; const len = p1.distanceTo(p2);
+            if (len < 0.001) return;
+            cyl.scale.set(cyl.scale.x, len, cyl.scale.z); 
+            cyl.position.copy(p1).lerp(p2, 0.5);
+            cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
+            cyl.updateMatrixWorld(true);
+        }
+
+        function syncHandlesAndLines(obj) {
+            if (!obj) return;
+            if (obj.userData.isHandle) {
+                obj.userData.connections.forEach(conn => {
+                    if (objectsArray.includes(conn.cylinder)) updateCylinderNode(conn.cylinder, obj, conn.sibling);
+                });
+            } else if (obj.userData.isLine) {
+                const h1 = obj.userData.h1; const h2 = obj.userData.h2;
+                if (h1 && h2 && objectsArray.includes(h1) && objectsArray.includes(h2)) {
+                    const dir = new THREE.Vector3(0, 1, 0).applyQuaternion(obj.quaternion).normalize();
+                    const halfLen = obj.scale.y / 2;
+                    h1.position.copy(obj.position).add(dir.clone().multiplyScalar(-halfLen));
+                    h2.position.copy(obj.position).add(dir.clone().multiplyScalar(halfLen));
+                    
+                    h1.userData.connections.forEach(conn => {
+                        if (conn.cylinder !== obj && objectsArray.includes(conn.cylinder)) updateCylinderNode(conn.cylinder, h1, conn.sibling);
+                    });
+                    h2.userData.connections.forEach(conn => {
+                        if (conn.cylinder !== obj && objectsArray.includes(conn.cylinder)) updateCylinderNode(conn.cylinder, h2, conn.sibling);
+                    });
+                }
+            }
+        }
+
+        transformControls.addEventListener('change', () => {
+            if (selectedObject) { highlightBox.update(); if (!isEditingInputs) syncUIFromObject(); syncHandlesAndLines(selectedObject); }
+        });
+
+        transformControls.addEventListener('dragging-changed', (event) => {
+            arcballControls.enabled = !event.value; 
+            if (selectedObject) highlightBox.visible = true; 
+            if (!event.value) saveState(); 
+        });
+
+        function syncUIFromObject() {
+            if (!selectedObject) return;
+            inpAll.value = ''; 
+            if (currentMode === 'translate') {
+                propLabel.textContent = 'Position';
+                inpX.value = selectedObject.position.x.toFixed(2); inpY.value = selectedObject.position.y.toFixed(2); inpZ.value = selectedObject.position.z.toFixed(2);
+            } else if (currentMode === 'scale') {
+                propLabel.textContent = 'Size';
+                inpX.value = selectedObject.scale.x.toFixed(2); inpY.value = selectedObject.scale.y.toFixed(2); inpZ.value = selectedObject.scale.z.toFixed(2);
+            } else if (currentMode === 'rotate') {
+                propLabel.textContent = 'Rot. (Deg)';
+                inpX.value = THREE.MathUtils.radToDeg(selectedObject.rotation.x).toFixed(1);
+                inpY.value = THREE.MathUtils.radToDeg(selectedObject.rotation.y).toFixed(1);
+                inpZ.value = THREE.MathUtils.radToDeg(selectedObject.rotation.z).toFixed(1);
+            }
+        }
+
+        function applyUIToObject() {
+            if (!selectedObject) return;
+            let x = parseFloat(inpX.value); let y = parseFloat(inpY.value); let z = parseFloat(inpZ.value);
+            if (isNaN(x)) x = 0; if (isNaN(y)) y = 0; if (isNaN(z)) z = 0;
+
+            if (currentMode === 'translate') selectedObject.position.set(x, y, z);
+            else if (currentMode === 'scale') {
+                if (x === 0) x = 0.001; if (y === 0) y = 0.001; if (z === 0) z = 0.001;
+                selectedObject.scale.set(x, y, z);
+            } 
+            else if (currentMode === 'rotate') selectedObject.rotation.set(THREE.MathUtils.degToRad(x), THREE.MathUtils.degToRad(y), THREE.MathUtils.degToRad(z));
+            transformControls.updateMatrixWorld(); highlightBox.update(); syncHandlesAndLines(selectedObject);
+        }
+
+        [inpX, inpY, inpZ].forEach(inp => {
+            inp.addEventListener('focus', () => { isEditingInputs = true; });
+            inp.addEventListener('blur', () => { isEditingInputs = false; syncUIFromObject(); saveState(); });
+            inp.addEventListener('input', applyUIToObject);
+        });
+
+        inpAll.addEventListener('focus', () => { isEditingInputs = true; });
+        inpAll.addEventListener('blur', () => { isEditingInputs = false; syncUIFromObject(); saveState(); });
+        inpAll.addEventListener('input', (e) => {
+            const val = e.target.value; inpX.value = val; inpY.value = val; inpZ.value = val; applyUIToObject();
+        });
+
+        let initialPinchDistance = null; let initialScale = null;
+        workspaceEl.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                transformControls.enabled = false;
+                if (selectedObject && currentMode === 'scale') {
+                    e.preventDefault(); arcballControls.enabled = false; 
+                    const dx = e.touches[0].clientX - e.touches[1].clientX; const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    initialPinchDistance = Math.sqrt(dx*dx + dy*dy); initialScale = selectedObject.scale.clone();
+                }
+            }
+        }, { passive: false });
+
+        workspaceEl.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2 && initialPinchDistance && selectedObject && currentMode === 'scale') {
+                e.preventDefault();
+                const dx = e.touches[0].clientX - e.touches[1].clientX; const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const smoothScaleFactor = 1 + ((Math.sqrt(dx*dx + dy*dy) / initialPinchDistance) - 1) * 0.3;
+                selectedObject.scale.copy(initialScale).multiplyScalar(smoothScaleFactor);
+                transformControls.updateMatrixWorld(); highlightBox.update(); syncUIFromObject(); syncHandlesAndLines(selectedObject);
+            }
+        }, { passive: false });
+
+        workspaceEl.addEventListener('touchend', (e) => {
+            if (e.touches.length < 2) {
+                if(initialPinchDistance) saveState(); 
+                initialPinchDistance = null; arcballControls.enabled = true; if (selectedObject) transformControls.enabled = true;
+            }
+        });
+
+        function getObjectWorldRadius(obj) {
+            if (!obj.geometry.boundingSphere) obj.geometry.computeBoundingSphere();
+            const scale = new THREE.Vector3(); obj.getWorldScale(scale);
+            return obj.geometry.boundingSphere.radius * Math.max(scale.x, scale.y, scale.z);
+        }
+
+        // ========================================================
+        // CORNER-TO-CORNER DIAGONAL SHAPE DRAWING ENGINE
+        // ========================================================
+        let shapeDrawType = null;
+        let activeDrawingShape = null;
+        let shapeDrawStartPoint = new THREE.Vector3();
+        let shapeDrawPlane = null;
+
+        function activateShapeDrawTool(type, btnEl) {
+            deselectObject();
+            currentMode = 'draw-shape';
+            shapeDrawType = type;
+            
+            ['btn-move', 'btn-scale', 'btn-rotate', 'btn-select', 'btn-paint', 'btn-pen'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.classList.remove('active');
+            });
+            ['add-line', 'add-cube', 'add-sphere', 'add-cone', 'add-plane', 'add-cylinder'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.classList.remove('active');
+            });
+            if (btnEl) btnEl.classList.add('active');
+
+            transformControls.detach();
+            highlightBox.visible = false;
+            noSelectText.style.display = 'block';
+            noSelectText.textContent = `Click Corner A & Drag to Corner B to draw ${type.toUpperCase()}!`;
+            noSelectText.style.color = "#00ff88";
+            propertiesPanel.style.display = 'none';
+        }
+
+        document.getElementById('add-cube').onclick = (e) => activateShapeDrawTool('cube', e.target);
+        document.getElementById('add-sphere').onclick = (e) => activateShapeDrawTool('sphere', e.target);
+        document.getElementById('add-cone').onclick = (e) => activateShapeDrawTool('cone', e.target);
+        document.getElementById('add-plane').onclick = (e) => activateShapeDrawTool('plane', e.target);
+        document.getElementById('add-cylinder').onclick = (e) => activateShapeDrawTool('cylinder', e.target);
+
+        // TEXT GENERATOR
+        let loadedFont = null;
+        const fontLoader = new FontLoader();
+        document.getElementById('add-text-btn').onclick = () => {
+            const textStr = document.getElementById('inp-text-str').value;
+            if (!textStr) return alert("Please enter some text first!");
+            if (loadedFont) spawnText(textStr, loadedFont);
+            else {
+                fontLoader.load('https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+                    loadedFont = font; spawnText(textStr, font);
+                });
+            }
+        };
+
+        function spawnText(text, font) {
+            const geom = new TextGeometry(text, { font: font, size: 1, height: 0.3, curveSegments: 3, bevelEnabled: false });
+            geom.computeBoundingBox(); const center = new THREE.Vector3(); geom.boundingBox.getCenter(center);
+            geom.translate(-center.x, -center.y, -center.z);
+            const activeHex = activePaletteBox ? activePaletteBox.dataset.color : '#ffffff';
+            cleanGeometry(geom, new THREE.Color(activeHex)); geom.computeBoundsTree(); 
+            const material = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.2, metalness: 0.1 });
+            const mesh = new THREE.Mesh(geom, material);
+            mesh.position.copy(arcballControls.target);
+            scene.add(mesh); objectsArray.push(mesh); selectObject(mesh);
+            saveState();
+        }
+
+        // ========================================================
+        // TOOLS & EVENT ROUTING
+        // ========================================================
+        let isDrawingLine = false; let lineDrawState = 0; 
+        let recordedRay = new THREE.Ray(); let lastMousePos = { x: 0, y: 0 };
+        let lastMouseTime = Date.now(); let currentMouseSpeed = 0; const SPEED_THRESHOLD = 2.0; 
+        let activeLineHandle = null; let hoveredNode = null; 
+
+        const ptMarker = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.7 }));
+        ptMarker.visible = false; scene.add(ptMarker); 
+        const previewLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xffa500, linewidth: 3 }));
+        previewLine.visible = false; scene.add(previewLine);
+        const laserMat = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2, transparent: true, opacity: 0.5 });
+        const laserLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), laserMat);
+        laserLine.visible = false; scene.add(laserLine);
+
+        let isPenDrawing = false; let penPoints = []; let activePenMesh = null; let penDrawPlane = null;
+        let isMarqueeDragging = false; let marqueeStart = { x: 0, y: 0 };
+
+        function updateToolButtons(activeBtn) {
+            ['btn-move', 'btn-scale', 'btn-rotate', 'btn-select', 'btn-paint', 'btn-pen'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.classList.remove('active');
+            });
+            activeBtn.classList.add('active');
+            
+            if (currentMode === 'paint' || currentMode === 'pen' || currentMode === 'select') {
+                transformControls.detach(); highlightBox.visible = false; noSelectText.style.display = 'block';
+                if(currentMode === 'paint') noSelectText.textContent = "Click face to paint!";
+                if(currentMode === 'pen') noSelectText.textContent = "Drag to draw in 3D!";
+                if(currentMode === 'select') noSelectText.textContent = "Drag marquee box over shapes to select multiple!";
+                noSelectText.style.color = "#00aaff"; propertiesPanel.style.display = 'none';
+            } else {
+                syncUIFromObject(); applyGizmoRestrictions(getClosestViewAxisStr());
+                if (selectedObject) { transformControls.attach(selectedObject); highlightBox.visible = true; noSelectText.style.display = 'none'; propertiesPanel.style.display = 'flex'; }
+            }
+        }
+
+        document.getElementById('btn-move').onclick = (e) => { currentMode = 'translate'; transformControls.setMode('translate'); updateToolButtons(e.target); };
+        document.getElementById('btn-scale').onclick = (e) => { currentMode = 'scale'; transformControls.setMode('scale'); updateToolButtons(e.target); };
+        document.getElementById('btn-rotate').onclick = (e) => { currentMode = 'rotate'; transformControls.setMode('rotate'); updateToolButtons(e.target); };
+        document.getElementById('btn-select').onclick = (e) => { currentMode = 'select'; cancelLineTool(); updateToolButtons(e.target); };
+        document.getElementById('btn-paint').onclick = (e) => { currentMode = 'paint'; cancelLineTool(); updateToolButtons(e.target); };
+        document.getElementById('btn-pen').onclick = (e) => { currentMode = 'pen'; cancelLineTool(); updateToolButtons(e.target); };
+
+        function updateGuideText() {
+            noSelectText.style.display = 'block'; noSelectText.style.color = "#ff9800";
+            if (lineDrawState === 1) noSelectText.textContent = "Draw: Click a Node to connect, or empty space to set Ray.";
+            if (lineDrawState === 2) noSelectText.textContent = "Ray Set! Fly camera and click to set depth.";
+            if (lineDrawState === 0 && currentMode !== 'paint' && currentMode !== 'pen' && currentMode !== 'select' && currentMode !== 'draw-shape') { noSelectText.textContent = "Select an object to edit"; noSelectText.style.color = "#888"; }
+        }
+
+        function cancelLineTool() {
+            isDrawingLine = false; lineDrawState = 0; activeLineHandle = null; hoveredNode = null;
+            ptMarker.visible = false; previewLine.visible = false; laserLine.visible = false;
+            document.getElementById('add-line').classList.remove('active');
+            objectsArray.forEach(obj => { if (obj.userData && obj.userData.isHandle) { obj.scale.set(1, 1, 1); obj.material.emissive.setHex(0x000000); }});
+            if(currentMode !== 'paint' && currentMode !== 'pen' && currentMode !== 'select' && currentMode !== 'draw-shape') updateGuideText();
+        }
+
+        document.getElementById('add-line').onclick = () => {
+            if (isDrawingLine) cancelLineTool(); 
+            else {
+                deselectObject(); currentMode = 'line';
+                ['btn-move', 'btn-scale', 'btn-rotate', 'btn-select', 'btn-paint', 'btn-pen'].forEach(id => document.getElementById(id).classList.remove('active'));
+                isDrawingLine = true; lineDrawState = 1; activeLineHandle = null;
+                ptMarker.visible = false; previewLine.visible = false; laserLine.visible = false;
+                document.getElementById('add-line').classList.add('active'); updateGuideText();
+            }
+        };
+
+        function getRaysClosestPoint(ray1, ray2) {
+            const O1 = ray1.origin; const D1 = ray1.direction.clone().normalize();
+            const O2 = ray2.origin; const D2 = ray2.direction.clone().normalize();
+            const w0 = new THREE.Vector3().subVectors(O1, O2);
+            const a = 1.0; const b = D1.dot(D2); const c = 1.0; const d = D1.dot(w0); const e = D2.dot(w0);
+            const denom = a * c - b * b;
+            if (Math.abs(denom) < 1e-6) return O1.clone().add(D1.clone().multiplyScalar(10));
+            const s = (b * e - c * d) / denom; const t = (a * e - b * d) / denom;
+            const p1 = new THREE.Vector3().copy(O1).add(D1.clone().multiplyScalar(s));
+            const p2 = new THREE.Vector3().copy(O2).add(D2.clone().multiplyScalar(t));
+            return new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+        }
+
+        function getHitPoint() {
+            const intersects = raycaster.intersectObjects(objectsArray);
+            if (intersects.length > 0 && !intersects[0].object.userData.isHandle) return intersects[0].point.clone(); 
+            const focus = arcballControls.target;
+            const planeNormal = getClosestViewNormal(); 
+            const mathPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal.clone().negate(), focus);
+            const targetPt = new THREE.Vector3(); if (raycaster.ray.intersectPlane(mathPlane, targetPt)) return targetPt; return new THREE.Vector3();
+        }
+
+        function createNodeMesh(pt) {
+            const activeHex = activePaletteBox ? activePaletteBox.dataset.color : '#00aaff';
+            const nodeGeom = new THREE.SphereGeometry(0.15, 16, 16); cleanGeometry(nodeGeom, new THREE.Color(activeHex)); nodeGeom.computeBoundsTree();
+            const nodeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.2, metalness: 0.1 });
+            const mesh = new THREE.Mesh(nodeGeom, nodeMat); mesh.position.copy(pt); mesh.userData = { isHandle: true, connections: [] };
+            scene.add(mesh); objectsArray.push(mesh); return mesh;
+        }
+
+        function createEdgeMesh(h1, h2) {
+            const activeHex = activePaletteBox ? activePaletteBox.dataset.color : '#ffffff';
+            const cylGeom = new THREE.CylinderGeometry(0.1, 0.1, 1, 16); cleanGeometry(cylGeom, new THREE.Color(activeHex)); cylGeom.computeBoundsTree();
+            const cylMat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.2, metalness: 0.1 });
+            const mesh = new THREE.Mesh(cylGeom, cylMat); mesh.userData = { isLine: true, h1: h1, h2: h2 };
+            scene.add(mesh); objectsArray.push(mesh); return mesh;
+        }
+
+        function placeNodeAt(target) {
+            let nextHandle;
+            if (target.isMesh && target.userData.isHandle) nextHandle = target; else nextHandle = createNodeMesh(target); 
+            if (!activeLineHandle) activeLineHandle = nextHandle;
+            else {
+                if (activeLineHandle !== nextHandle) {
+                    const alreadyConnected = activeLineHandle.userData.connections.some(c => c.sibling === nextHandle);
+                    if (!alreadyConnected) {
+                        const edge = createEdgeMesh(activeLineHandle, nextHandle);
+                        activeLineHandle.userData.connections.push({ cylinder: edge, sibling: nextHandle });
+                        nextHandle.userData.connections.push({ cylinder: edge, sibling: activeLineHandle });
+                        updateCylinderNode(edge, activeLineHandle, nextHandle);
+                        saveState(); 
+                    }
+                    activeLineHandle = nextHandle;
+                }
+            }
+        }
+
+        workspaceEl.addEventListener('pointermove', (event) => {
+            const now = Date.now(); const dt = Math.max(1, now - lastMouseTime);
+            currentMouseSpeed = Math.hypot(event.clientX - lastMousePos.x, event.clientY - lastMousePos.y) / dt;
+            lastMousePos.x = event.clientX; lastMousePos.y = event.clientY; lastMouseTime = now;
+
+            if (currentMode === 'select' && isMarqueeDragging) {
+                const rect = workspaceEl.getBoundingClientRect();
+                const currX = event.clientX - rect.left;
+                const currY = event.clientY - rect.top;
+                const left = Math.min(marqueeStart.x, currX);
+                const top = Math.min(marqueeStart.y, currY);
+                const width = Math.abs(currX - marqueeStart.x);
+                const height = Math.abs(currY - marqueeStart.y);
+                marqueeEl.style.left = left + 'px';
+                marqueeEl.style.top = top + 'px';
+                marqueeEl.style.width = width + 'px';
+                marqueeEl.style.height = height + 'px';
+                return;
+            }
+
+            const rect = workspaceEl.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            // CORNER-TO-CORNER DIAGONAL SHAPE DRAG SCALING
+            if (currentMode === 'draw-shape' && activeDrawingShape && shapeDrawPlane) {
+                const hit = new THREE.Vector3();
+                if (raycaster.ray.intersectPlane(shapeDrawPlane, hit)) {
+                    const dist = hit.distanceTo(shapeDrawStartPoint);
+                    const scaleFactor = Math.max(0.05, dist);
+                    
+                    activeDrawingShape.position.copy(shapeDrawStartPoint).lerp(hit, 0.5);
+                    activeDrawingShape.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                }
+                return;
+            }
+
+            if (currentMode === 'pen' && isPenDrawing && activePenMesh && penDrawPlane) {
+                const hit = new THREE.Vector3();
+                if(raycaster.ray.intersectPlane(penDrawPlane, hit)) {
+                    if (hit.distanceTo(penPoints[penPoints.length - 1]) > 0.05) {
+                        penPoints.push(hit);
+                        const curve = new THREE.CatmullRomCurve3(penPoints);
+                        const pSize = parseFloat(inpPenSize.value) || 0.1;
+                        const newGeom = new THREE.TubeGeometry(curve, penPoints.length * 4, pSize, 8, false);
+                        const activeHex = activePaletteBox ? activePaletteBox.dataset.color : inpColor.value;
+                        cleanGeometry(newGeom, new THREE.Color(activeHex));
+                        activePenMesh.geometry.dispose(); activePenMesh.geometry = newGeom;
+                    }
+                }
+                return;
+            }
+
+            if (isDrawingLine && lineDrawState !== 0) {
+                let magnetNode = null;
+                if (currentMouseSpeed <= SPEED_THRESHOLD) {
+                    let closestDist = Infinity;
+                    for (let obj of objectsArray) {
+                        if (obj.userData.isHandle) {
+                            let distToNode = Infinity;
+                            if (lineDrawState === 1) {
+                                distToNode = raycaster.ray.distanceSqToPoint(obj.position);
+                                const toNode = new THREE.Vector3().subVectors(obj.position, raycaster.ray.origin);
+                                if (toNode.dot(raycaster.ray.direction) < 0) continue; 
+                            } else if (lineDrawState === 2) {
+                                const intersectPt = getRaysClosestPoint(recordedRay, raycaster.ray);
+                                distToNode = intersectPt.distanceTo(obj.position);
+                            }
+                            if (distToNode < 0.25 && distToNode < closestDist) { closestDist = distToNode; magnetNode = obj; }
+                        }
+                    }
+                }
+
+                hoveredNode = magnetNode;
+                objectsArray.forEach(obj => { if (obj.userData && obj.userData.isHandle) { obj.scale.set(1, 1, 1); obj.material.emissive.setHex(0x000000); }});
+                
+                let drawPt;
+                if (magnetNode) { magnetNode.scale.set(1.5, 1.5, 1.5); magnetNode.material.emissive.setHex(0x555555); drawPt = magnetNode.position.clone(); } 
+                else { if (lineDrawState === 1) drawPt = getHitPoint(); else drawPt = getRaysClosestPoint(recordedRay, raycaster.ray); }
+
+                ptMarker.position.copy(drawPt); ptMarker.visible = true;
+                if (activeLineHandle) { previewLine.geometry.setFromPoints([activeLineHandle.position, drawPt]); previewLine.visible = true; }
+            }
+        });
+
+        workspaceEl.addEventListener('pointerdown', (event) => {
+            if (currentMode === 'draw-shape' && event.button === 0) {
+                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+                arcballControls.enabled = false;
+                
+                const rect = workspaceEl.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                let hitPoint = null;
+                if (objectsArray.length > 0) {
+                    const hits = raycaster.intersectObjects(objectsArray);
+                    if (hits.length > 0) hitPoint = hits[0].point.clone();
+                }
+                if (!hitPoint) {
+                    const camForward = new THREE.Vector3();
+                    camera.getWorldDirection(camForward);
+                    const mathPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(camForward.negate(), arcballControls.target);
+                    hitPoint = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(mathPlane, hitPoint);
+                }
+
+                shapeDrawStartPoint.copy(hitPoint);
+                const camForward = new THREE.Vector3();
+                camera.getWorldDirection(camForward);
+                shapeDrawPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(camForward.negate(), hitPoint);
+
+                let geom;
+                let is2D = false;
+                if (shapeDrawType === 'cube') geom = new THREE.BoxGeometry(1, 1, 1);
+                else if (shapeDrawType === 'sphere') geom = new THREE.SphereGeometry(0.5, 32, 32);
+                else if (shapeDrawType === 'cone') geom = new THREE.ConeGeometry(0.5, 1, 32);
+                else if (shapeDrawType === 'plane') { geom = new THREE.PlaneGeometry(1, 1); geom.rotateX(-Math.PI/2); is2D = true; }
+                else if (shapeDrawType === 'cylinder') geom = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
+
+                const activeHex = activePaletteBox ? activePaletteBox.dataset.color : '#ffffff';
+                cleanGeometry(geom, new THREE.Color(activeHex));
+                geom.computeBoundsTree();
+
+                const material = new THREE.MeshStandardMaterial({ 
+                    color: 0xffffff, vertexColors: true, roughness: 0.2, metalness: 0.1, side: is2D ? THREE.DoubleSide : THREE.FrontSide
+                });
+
+                activeDrawingShape = new THREE.Mesh(geom, material);
+                activeDrawingShape.position.copy(hitPoint);
+                activeDrawingShape.scale.set(0.01, 0.01, 0.01);
+                activeDrawingShape.is2D = is2D;
+
+                scene.add(activeDrawingShape);
+                objectsArray.push(activeDrawingShape);
+                return;
+            }
+
+            if (currentMode === 'select' && event.button === 0) {
+                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+                isMarqueeDragging = true; arcballControls.enabled = false;
+                const rect = workspaceEl.getBoundingClientRect();
+                marqueeStart.x = event.clientX - rect.left;
+                marqueeStart.y = event.clientY - rect.top;
+                marqueeEl.style.left = marqueeStart.x + 'px';
+                marqueeEl.style.top = marqueeStart.y + 'px';
+                marqueeEl.style.width = '0px';
+                marqueeEl.style.height = '0px';
+                marqueeEl.style.display = 'block';
+                return;
+            }
+
+            if (currentMode === 'pen') {
+                if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+                isPenDrawing = true; penPoints = []; arcballControls.enabled = false; 
+                
+                const rect = workspaceEl.getBoundingClientRect(); mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                const planeNormal = camera.getWorldDirection(new THREE.Vector3()).negate();
+                let hitPoint = raycaster.intersectObjects(objectsArray)[0]?.point;
+                if (!hitPoint) { 
+                    const focus = arcballControls.target;
+                    const mathPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, focus); 
+                    hitPoint = new THREE.Vector3(); raycaster.ray.intersectPlane(mathPlane, hitPoint); 
+                }
+
+                penDrawPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, hitPoint);
+                penPoints.push(hitPoint); penPoints.push(hitPoint.clone().add(new THREE.Vector3(0.001, 0.001, 0.001))); 
+                
+                const curve = new THREE.CatmullRomCurve3(penPoints); const pSize = parseFloat(inpPenSize.value) || 0.1;
+                const activeHex = activePaletteBox ? activePaletteBox.dataset.color : inpColor.value;
+                const geom = new THREE.TubeGeometry(curve, 20, pSize, 8, false); cleanGeometry(geom, new THREE.Color(activeHex));
+                
+                const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.2, metalness: 0.1 });
+                activePenMesh = new THREE.Mesh(geom, mat); scene.add(activePenMesh); objectsArray.push(activePenMesh);
+            }
+        });
+
+        workspaceEl.addEventListener('pointerup', (event) => {
+            if (event.target.closest('#properties-panel') || event.target.closest('.top-bar') || event.target.closest('.left-sidebar')) return;
+
+            if (currentMode === 'draw-shape' && activeDrawingShape) {
+                arcballControls.enabled = true;
+                if (activeDrawingShape.scale.x < 0.15) {
+                    activeDrawingShape.scale.set(1, 1, 1);
+                    activeDrawingShape.position.copy(shapeDrawStartPoint);
+                }
+                activeDrawingShape.geometry.computeBoundsTree();
+                const finishedShape = activeDrawingShape;
+                activeDrawingShape = null; shapeDrawPlane = null;
+
+                ['add-line', 'add-cube', 'add-sphere', 'add-cone', 'add-plane', 'add-cylinder'].forEach(id => {
+                    const el = document.getElementById(id); if (el) el.classList.remove('active');
+                });
+
+                currentMode = 'translate';
+                transformControls.setMode('translate');
+                document.getElementById('btn-move').classList.add('active');
+                selectObject(finishedShape);
+                saveState();
+                return;
+            }
+
+            if (currentMode === 'select' && isMarqueeDragging) {
+                isMarqueeDragging = false; marqueeEl.style.display = 'none'; arcballControls.enabled = true;
+                
+                const rect = workspaceEl.getBoundingClientRect();
+                const currX = event.clientX - rect.left;
+                const currY = event.clientY - rect.top;
+                const width = Math.abs(currX - marqueeStart.x);
+                const height = Math.abs(currY - marqueeStart.y);
+
+                if (width < 5 && height < 5) {
+                    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                    raycaster.setFromCamera(mouse, camera);
+                    const intersects = raycaster.intersectObjects(objectsArray);
+                    if (intersects.length > 0) selectObjects([intersects[0].object]); else deselectObject();
+                } else {
+                    const left = Math.min(marqueeStart.x, currX);
+                    const top = Math.min(marqueeStart.y, currY);
+                    const ndcMinX = ((left) / rect.width) * 2 - 1;
+                    const ndcMaxX = ((left + width) / rect.width) * 2 - 1;
+                    const ndcMinY = -((top + height) / rect.height) * 2 + 1;
+                    const ndcMaxY = -((top) / rect.height) * 2 + 1;
+
+                    const hits = [];
+                    objectsArray.forEach(obj => {
+                        if (!obj.geometry || obj === selectionGroup) return;
+                        if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+                        const center = new THREE.Vector3();
+                        obj.geometry.boundingBox.getCenter(center);
+                        center.applyMatrix4(obj.matrixWorld);
+                        center.project(camera);
+
+                        if (center.x >= ndcMinX && center.x <= ndcMaxX && center.y >= ndcMinY && center.y <= ndcMaxY && center.z < 1) {
+                            hits.push(obj);
+                        }
+                    });
+                    selectObjects(hits);
+                }
+                return;
+            }
+
+            if (currentMode === 'pen' && isPenDrawing) {
+                isPenDrawing = false; arcballControls.enabled = true; 
+                if(activePenMesh) { activePenMesh.geometry.computeBoundsTree(); saveState(); } 
+                activePenMesh = null; return;
+            }
+
+            if (transformControls.dragging || event.touches?.length > 1) return;
+
+            const dist = Math.hypot(event.clientX - pointerDownCtx.x, event.clientY - pointerDownCtx.y);
+            if (dist > 5) return; 
+
+            const rect = workspaceEl.getBoundingClientRect(); mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            if (currentMode === 'paint') {
+                const intersects = raycaster.intersectObjects(objectsArray);
+                if (intersects.length > 0) {
+                    const intersect = intersects[0]; const obj = intersect.object;
+                    if(obj.userData.isLine || obj.userData.isHandle) return; 
+
+                    const face = intersect.face; const geom = obj.geometry;
+                    const posAttr = geom.attributes.position; const colorAttr = geom.attributes.color;
+                    if (!colorAttr) return; 
+
+                    const activeHex = activePaletteBox ? activePaletteBox.dataset.color : inpColor.value;
+                    const paintCol = new THREE.Color(activeHex); const clickNormal = face.normal.clone();
+                    const pA = new THREE.Vector3().fromBufferAttribute(posAttr, face.a); pA.applyMatrix4(obj.matrixWorld);
+                    const worldNormal = clickNormal.clone().transformDirection(obj.matrixWorld).normalize();
+                    const clickPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(worldNormal, pA);
+
+                    const p1 = new THREE.Vector3(), p2 = new THREE.Vector3(), p3 = new THREE.Vector3();
+                    const cb = new THREE.Vector3(), ab = new THREE.Vector3();
+
+                    for (let i = 0; i < geom.index.count; i += 3) {
+                        const a = geom.index.getX(i); const b = geom.index.getX(i+1); const c = geom.index.getX(i+2);
+                        p1.fromBufferAttribute(posAttr, a); p2.fromBufferAttribute(posAttr, b); p3.fromBufferAttribute(posAttr, c);
+                        cb.subVectors(p3, p2); ab.subVectors(p1, p2); const triNormal = cb.cross(ab).normalize();
+                        
+                        if (triNormal.dot(clickNormal) > 0.99) {
+                            p1.applyMatrix4(obj.matrixWorld);
+                            if (Math.abs(clickPlane.distanceToPoint(p1)) < 0.01) {
+                                colorAttr.setXYZ(a, paintCol.r, paintCol.g, paintCol.b);
+                                colorAttr.setXYZ(b, paintCol.r, paintCol.g, paintCol.b);
+                                colorAttr.setXYZ(c, paintCol.r, paintCol.g, paintCol.b);
+                            }
+                        }
+                    }
+                    colorAttr.needsUpdate = true;
+                    saveState();
+                }
+                return;
+            }
+
+            if (isDrawingLine) {
+                if (lineDrawState === 1) {
+                    if (hoveredNode) placeNodeAt(hoveredNode); 
+                    else {
+                        const intersects = raycaster.intersectObjects(objectsArray);
+                        if (intersects.length > 0 && !intersects[0].object.userData.isLine && !intersects[0].object.userData.isHandle) {
+                            placeNodeAt(intersects[0].point); 
+                        } else {
+                            recordedRay = raycaster.ray.clone();
+                            laserLine.geometry.setFromPoints([recordedRay.origin.clone(), recordedRay.origin.clone().add(recordedRay.direction.clone().multiplyScalar(100))]);
+                            laserLine.visible = true; lineDrawState = 2; updateGuideText();
+                        }
+                    }
+                } 
+                else if (lineDrawState === 2) {
+                    laserLine.visible = false;
+                    if (hoveredNode) placeNodeAt(hoveredNode); else placeNodeAt(getRaysClosestPoint(recordedRay, raycaster.ray));
+                    lineDrawState = 1; updateGuideText();
+                }
+                return; 
+            }
+
+            const intersects = raycaster.intersectObjects(objectsArray);
+            if (intersects.length > 0) {
+                intersects.sort((a, b) => {
+                    const aIsWire = (a.object.material.wireframe || a.object.isCutter) ? 1 : 0; const bIsWire = (b.object.material.wireframe || b.object.isCutter) ? 1 : 0;
+                    if (aIsWire !== bIsWire) return aIsWire - bIsWire;
+                    const sizeA = getObjectWorldRadius(a.object); const sizeB = getObjectWorldRadius(b.object);
+                    if (Math.abs(sizeA - sizeB) > 0.05) return sizeA - sizeB; return a.distance - b.distance;
+                });
+                selectObjects([intersects[0].object]);
+            } else deselectObject();
+        });
+
+        // ========================================================
+        // MULTI-SELECTION & CSG CUTTER EXECUTION
+        // ========================================================
+        const btnXray = document.getElementById('btn-xray'); 
+        const btnCutter = document.getElementById('btn-cutter');
+        const btnExecuteCut = document.getElementById('btn-execute-cut');
+
+        function selectObjects(meshes) {
+            cancelLineTool();
+            while (selectionGroup.children.length > 0) scene.attach(selectionGroup.children[0]);
+            
+            if (meshes.length === 0) {
+                deselectObject();
+                return;
+            } else if (meshes.length === 1) {
+                selectedMeshes = [meshes[0]];
+                selectObject(meshes[0]);
+            } else {
+                selectedMeshes = [...meshes];
+                const center = new THREE.Vector3();
+                meshes.forEach(m => center.add(m.position));
+                center.divideScalar(meshes.length);
+
+                selectionGroup.position.copy(center);
+                selectionGroup.quaternion.identity();
+                selectionGroup.scale.set(1, 1, 1);
+
+                meshes.forEach(m => selectionGroup.attach(m));
+                selectedObject = selectionGroup;
+                transformControls.attach(selectionGroup);
+                highlightBox.setFromObject(selectionGroup);
+                highlightBox.visible = true;
+
+                recenterPivotOnObject(selectionGroup);
+                noSelectText.style.display = 'none';
+                propertiesPanel.style.display = 'flex';
+                syncUIFromObject();
+            }
+        }
+
+        function selectObject(mesh) {
+            selectedObject = mesh; transformControls.attach(mesh);
+            highlightBox.setFromObject(mesh); highlightBox.visible = true; 
+            
+            recenterPivotOnObject(mesh);
+            
+            noSelectText.style.display = 'none'; propertiesPanel.style.display = 'flex';
+            if (!arcballControls.isLockedParallel) snapCameraToClosestFace(); syncUIFromObject(); 
+
+            if (mesh.material && mesh.material.wireframe && !mesh.isCutter) btnXray.classList.add('active'); else btnXray.classList.remove('active');
+            if (mesh.isCutter) { btnCutter.classList.add('active'); btnExecuteCut.style.display = 'block'; } 
+            else { btnCutter.classList.remove('active'); btnExecuteCut.style.display = 'none'; }
+        }
+
+        function deselectObject() {
+            while (selectionGroup.children.length > 0) scene.attach(selectionGroup.children[0]);
+            selectedMeshes = [];
+            selectedObject = null; transformControls.detach(); propertiesPanel.style.display = 'none';
+            if(lineDrawState === 0 && currentMode !== 'paint' && currentMode !== 'pen' && currentMode !== 'select' && currentMode !== 'draw-shape') { noSelectText.textContent = "Select an object to edit"; noSelectText.style.display = 'block'; noSelectText.style.color = "#888"; }
+            highlightBox.visible = false; transformControls.showX = true; transformControls.showY = true; transformControls.showZ = true;
+        }
+
+        btnXray.onclick = () => {
+            const targets = selectedMeshes.length > 0 ? selectedMeshes : (selectedObject && selectedObject !== selectionGroup ? [selectedObject] : []);
+            targets.forEach(obj => {
+                if (!obj.isCutter && obj.material) {
+                    const isWireframe = !obj.material.wireframe; obj.material.wireframe = isWireframe;
+                    obj.material.transparent = isWireframe; obj.material.opacity = isWireframe ? 0.3 : 1.0;
+                    obj.material.needsUpdate = true;
+                }
+            });
+        };
+
+        function splitMesh(resultMesh, originalMaterial) {
+            const geom = resultMesh.geometry; const positions = geom.attributes.position; if (!positions || positions.count === 0) return [];
+            const vertexCount = positions.count; const posHash = new Map(); let uniqueCount = 0; const posId = new Int32Array(vertexCount);
+            for (let i = 0; i < vertexCount; i++) {
+                const x = Math.round(positions.getX(i) * 10000); const y = Math.round(positions.getY(i) * 10000); const z = Math.round(positions.getZ(i) * 10000);
+                const key = `${x},${y},${z}`; if (!posHash.has(key)) posHash.set(key, uniqueCount++); posId[i] = posHash.get(key);
+            }
+            const parent = new Int32Array(uniqueCount); for(let i=0; i<uniqueCount; i++) parent[i] = i;
+            function find(i) { let root = i; while(root !== parent[root]) root = parent[root]; let curr = i; while(curr !== root) { let nxt = parent[curr]; parent[curr] = root; curr = nxt; } return root; }
+            function union(i, j) { const rootI = find(i); const rootJ = find(j); if (rootI !== rootJ) parent[rootI] = rootJ; }
+            const indices = geom.index ? geom.index.array : null; const triCount = indices ? indices.length / 3 : vertexCount / 3;
+            for (let t = 0; t < triCount; t++) {
+                const v0 = indices ? indices[t*3] : t*3; const v1 = indices ? indices[t*3+1] : t*3+1; const v2 = indices ? indices[t*3+2] : t*3+2;
+                union(posId[v0], posId[v1]); union(posId[v1], posId[v2]);
+            }
+            const groups = new Map();
+            for (let t = 0; t < triCount; t++) {
+                const v0 = indices ? indices[t*3] : t*3; const root = find(posId[v0]);
+                if (!groups.has(root)) groups.set(root, []);
+                if (indices) groups.get(root).push(indices[t*3], indices[t*3+1], indices[t*3+2]); else groups.get(root).push(t*3, t*3+1, t*3+2);
+            }
+            const meshes = []; const attributes = geom.attributes;
+            for(let [root, groupIndices] of groups) {
+                const newGeom = new THREE.BufferGeometry(); const newIndices = []; const oldToNew = new Map(); const attrArrays = {};
+                for (const key in attributes) attrArrays[key] = []; let newIdx = 0;
+                for(let i=0; i<groupIndices.length; i++) {
+                    const oldIdx = groupIndices[i];
+                    if (!oldToNew.has(oldIdx)) {
+                        oldToNew.set(oldIdx, newIdx);
+                        for (const key in attributes) { const attr = attributes[key]; for(let c=0; c<attr.itemSize; c++) attrArrays[key].push(attr.getComponent(oldIdx, c)); }
+                        newIdx++;
+                    }
+                    newIndices.push(oldToNew.get(oldIdx));
+                }
+                for (const key in attributes) newGeom.setAttribute(key, new THREE.Float32BufferAttribute(attrArrays[key], attributes[key].itemSize));
+                newGeom.setIndex(new THREE.Uint32BufferAttribute(newIndices, 1)); cleanGeometry(newGeom); 
+                newGeom.computeBoundingBox(); const center = new THREE.Vector3(); newGeom.boundingBox.getCenter(center);
+                newGeom.translate(-center.x, -center.y, -center.z); newGeom.computeBoundsTree(); 
+                const islandMesh = new THREE.Mesh(newGeom, originalMaterial.clone()); islandMesh.position.copy(center); meshes.push(islandMesh);
+            }
+            return meshes;
+        }
+
+        btnCutter.onclick = () => {
+            if(!selectedObject || selectedObject === selectionGroup) return;
+            if(!selectedObject.isCutter) {
+                selectedObject.isCutter = true; selectedObject.userData.originalMaterial = selectedObject.material;
+                selectedObject.material = new THREE.MeshStandardMaterial({ color: 0xff0000, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+                btnCutter.classList.add('active'); btnExecuteCut.style.display = 'block'; btnXray.classList.remove('active'); 
+            } else {
+                selectedObject.isCutter = false; if(selectedObject.userData.originalMaterial) selectedObject.material = selectedObject.userData.originalMaterial;
+                btnCutter.classList.remove('active'); btnExecuteCut.style.display = 'none';
+            }
+        };
+
+        btnExecuteCut.onclick = () => {
+            if(!selectedObject || !selectedObject.isCutter) return;
+            const evaluator = new Evaluator(); evaluator.useGroups = false; evaluator.attributes = ['position', 'normal', 'color']; 
+            selectedObject.updateMatrixWorld(true);
+            const cutterBrush = new Brush(selectedObject.geometry, selectedObject.material);
+            cutterBrush.position.copy(selectedObject.getWorldPosition(new THREE.Vector3())); cutterBrush.quaternion.copy(selectedObject.getWorldQuaternion(new THREE.Quaternion()));
+            cutterBrush.scale.copy(selectedObject.getWorldScale(new THREE.Vector3())); cutterBrush.updateMatrixWorld(true);
+            const cutterBox = new THREE.Box3().setFromObject(selectedObject); const objectsToRemove = []; const newObjects = [];
+
+            objectsArray.forEach(obj => {
+                if (obj === selectedObject || obj.isCutter || obj.is2D || obj.userData.isHandle || obj.userData.isLine) return;
+                obj.updateMatrixWorld(true); const objBox = new THREE.Box3().setFromObject(obj);
+                if (cutterBox.intersectsBox(objBox)) {
+                    const targetBrush = new Brush(obj.geometry, obj.material);
+                    targetBrush.position.copy(obj.getWorldPosition(new THREE.Vector3())); targetBrush.quaternion.copy(obj.getWorldQuaternion(new THREE.Quaternion()));
+                    targetBrush.scale.copy(obj.getWorldScale(new THREE.Vector3())); targetBrush.updateMatrixWorld(true);
+                    try {
+                        const result = evaluator.evaluate(targetBrush, cutterBrush, SUBTRACTION);
+                        if (result && result.geometry.attributes.position.count > 0) {
+                            objectsToRemove.push(obj); const origMaterial = obj.userData.originalMaterial || obj.material;
+                            const islands = splitMesh(result, origMaterial); newObjects.push(...islands);
+                        }
+                    } catch (err) { console.error("CSG Cut Error:", err); alert("Cut failed: Geometry indexing error."); }
+                }
+            });
+            objectsToRemove.forEach(obj => { if (obj.parent) obj.parent.remove(obj); else scene.remove(obj); objectsArray.splice(objectsArray.indexOf(obj), 1); });
+            newObjects.forEach(obj => { scene.add(obj); objectsArray.push(obj); });
+            if(objectsToRemove.length > 0) { deselectObject(); saveState(); }
+        };
+
+        document.getElementById('btn-delete').onclick = () => {
+            const targets = selectedMeshes.length > 0 ? [...selectedMeshes] : (selectedObject && selectedObject !== selectionGroup ? [selectedObject] : []);
+            if (targets.length > 0) {
+                while (selectionGroup.children.length > 0) scene.attach(selectionGroup.children[0]);
+                targets.forEach(obj => {
+                    if (obj.userData.isHandle) {
+                        obj.userData.connections.forEach(conn => {
+                            const sibling = conn.sibling; if (sibling) sibling.userData.connections = sibling.userData.connections.filter(c => c.cylinder !== conn.cylinder);
+                            if (conn.cylinder && conn.cylinder.parent) { scene.remove(conn.cylinder); objectsArray.splice(objectsArray.indexOf(conn.cylinder), 1); }
+                        });
+                    }
+                    else if (obj.userData.isLine) {
+                        const h1 = obj.userData.h1; const h2 = obj.userData.h2;
+                        if (h1) h1.userData.connections = h1.userData.connections.filter(c => c.cylinder !== obj);
+                        if (h2) h2.userData.connections = h2.userData.connections.filter(c => c.cylinder !== obj);
+                    }
+                    if (obj.parent) obj.parent.remove(obj); else scene.remove(obj);
+                    const idx = objectsArray.indexOf(obj);
+                    if (idx !== -1) objectsArray.splice(idx, 1);
+                });
+                deselectObject(); saveState();
+            }
+        };
+
+        const resizeObserver = new ResizeObserver(() => {
+            camera.aspect = workspaceEl.clientWidth / workspaceEl.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(workspaceEl.clientWidth, workspaceEl.clientHeight);
+        });
+        resizeObserver.observe(workspaceEl);
+
+        function animate() {
+            requestAnimationFrame(animate); 
+            renderer.setViewport(0, 0, workspaceEl.clientWidth, workspaceEl.clientHeight); renderer.setScissor(0, 0, workspaceEl.clientWidth, workspaceEl.clientHeight);
+            renderer.setScissorTest(true); renderer.clear(); renderer.render(scene, camera);
+            
+            cubeCamera.quaternion.copy(camera.quaternion);
+            const cubeSize = 60; renderer.setViewport(0, 0, cubeSize, cubeSize); cubeRenderer.render(cubeScene, cubeCamera);
+        }
+
+        setTimeout(saveState, 500);
+        animate();
+    </script>
+</body>
+</html>

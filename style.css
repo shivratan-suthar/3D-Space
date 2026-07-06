@@ -1,0 +1,413 @@
+body {
+    margin: 0; 
+    background-color: #111; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center;
+    height: 100vh; 
+    width: 100vw; 
+    font-family: 'Segoe UI', Tahoma, sans-serif; 
+    color: #fff;
+    touch-action: none; 
+    overflow: hidden; 
+}
+
+/* FULLSCREEN CONTAINER FOR BOTH PC AND MOBILE */
+.app-container {
+    display: flex; 
+    flex-direction: column; 
+    height: 100vh; 
+    width: 100vw; 
+    max-width: 100%; 
+    max-height: 100%; 
+    background-color: #000000; 
+    position: relative;
+}
+
+.top-bar {
+    height: 60px; 
+    background-color: #222222; 
+    border-bottom: 1px solid #444; 
+    display: flex;
+    justify-content: space-between; 
+    align-items: center; 
+    box-sizing: border-box; 
+    flex-shrink: 0;
+}
+
+#ui-wrapper { 
+    flex: 1; 
+    display: flex; 
+    align-items: center; 
+    padding-left: 10px; 
+    overflow-x: auto; 
+    gap: 8px;
+}
+
+#no-selection-text { 
+    color: #888; 
+    font-size: 13px; 
+    user-select: none; 
+    font-weight: bold; 
+    white-space: nowrap; 
+    margin-right: 5px;
+}
+
+#manipulation-tools { 
+    display: flex; 
+    align-items: center; 
+    gap: 6px; 
+}
+
+#view-cube-container {
+    width: 60px; 
+    height: 60px; 
+    background-color: #1a1a1a; 
+    border-left: 1px solid #444;
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    flex-shrink: 0;
+}
+
+/* MULTI-WORKSPACE TABS BAR */
+.tabs-bar {
+    height: 35px;
+    background-color: #181a1b;
+    border-bottom: 1px solid #2d3134;
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+    gap: 6px;
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.tab {
+    background-color: #242729;
+    color: #b2b2b2;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.15s, color 0.15s;
+    border: 1px solid #2d3134;
+    border-bottom: none;
+    user-select: none;
+}
+
+.tab:hover {
+    background-color: #2d3134;
+    color: #fff;
+}
+
+.tab.active {
+    background-color: #008CBA;
+    color: #fff;
+    border-color: #008CBA;
+}
+
+#btn-add-tab {
+    background-color: #4CAF50;
+    color: #fff;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+#btn-add-tab:hover {
+    background-color: #45a049;
+}
+
+#properties-panel {
+    background-color: #1a1a1a; 
+    border-bottom: 1px solid #444; 
+    display: none; 
+    padding: 8px 12px; 
+    font-size: 12px; 
+    align-items: center; 
+    flex-wrap: wrap; 
+    gap: 12px; 
+    flex-shrink: 0;
+}
+
+.prop-group { 
+    display: flex; 
+    align-items: center; 
+    gap: 5px; 
+}
+
+#prop-label { 
+    font-weight: bold; 
+    color: #008CBA; 
+}
+
+.prop-group input[type="text"], .prop-group input[type="number"] {
+    width: 40px; 
+    background: #111; 
+    border: 1px solid #555; 
+    color: #fff;
+    padding: 4px; 
+    border-radius: 4px; 
+    text-align: center; 
+    font-size: 12px;
+}
+
+.prop-group input:focus { 
+    outline: none; 
+    border-color: #008CBA; 
+}
+
+#inp-all { 
+    border-color: #e91e63; 
+}
+
+#inp-all:focus { 
+    border-color: #ff4081; 
+}
+
+input[type="color"] {
+    background: none; 
+    border: none; 
+    padding: 0; 
+    width: 28px; 
+    height: 28px; 
+    cursor: pointer; 
+    border-radius: 4px;
+}
+
+/* MAIN BODY: LEFT SIDEBAR + WORKSPACE */
+.main-body {
+    display: flex; 
+    flex: 1; 
+    position: relative; 
+    overflow: hidden;
+}
+
+.left-sidebar {
+    width: 85px; 
+    background-color: #1c1c1c; 
+    border-right: 1px solid #333;
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    padding: 12px 8px; 
+    gap: 10px;
+    overflow-y: auto; 
+    flex-shrink: 0; 
+    z-index: 10;
+}
+
+.left-sidebar button {
+    width: 100%; 
+    padding: 10px 4px; 
+    font-size: 12px; 
+    white-space: normal; 
+    line-height: 1.2;
+}
+
+.sidebar-divider {
+    width: 80%; 
+    height: 1px; 
+    background-color: #333; 
+    margin: 4px 0;
+}
+
+#inp-text-str {
+    width: 90% !important; 
+    background: #111; 
+    border: 1px solid #555; 
+    color: #fff;
+    padding: 6px; 
+    border-radius: 4px; 
+    font-size: 11px; 
+    text-align: center;
+}
+
+#inp-text-str:focus { 
+    outline: none; 
+    border-color: #673ab7; 
+}
+
+/* 2x4 COLOR PALETTE GRID STYLES */
+#palette-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    width: 100%;
+}
+
+.palette-box {
+    height: 24px;
+    border-radius: 4px;
+    border: 2px solid #333;
+    cursor: pointer;
+    transition: transform 0.1s, border-color 0.1s;
+    box-sizing: border-box;
+}
+
+.palette-box:hover {
+    transform: scale(1.08);
+}
+
+.palette-box.active {
+    border-color: #ffffff;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+
+#inp-palette-color {
+    width: 100% !important;
+    height: 30px;
+    cursor: pointer;
+    border: 1px solid #555;
+    border-radius: 4px;
+}
+
+#workspace { 
+    flex: 1; 
+    position: relative; 
+    background-color: #000000; 
+    overflow: hidden; 
+    height: 100%; 
+    width: 100%;
+}
+
+/* AREA SELECTION MARQUEE BOX */
+#selection-marquee {
+    position: absolute;
+    border: 1px dashed #00aaff;
+    background-color: rgba(0, 170, 255, 0.15);
+    pointer-events: none;
+    display: none;
+    z-index: 1000;
+}
+
+button {
+    background-color: #4CAF50; 
+    color: white; 
+    border: none; 
+    padding: 7px 10px;
+    border-radius: 6px; 
+    font-weight: bold; 
+    cursor: pointer; 
+    transition: 0.2s; 
+    white-space: nowrap; 
+    font-size: 12px;
+}
+
+button:hover { 
+    background-color: #45a049; 
+}
+
+.tool-btn { 
+    background-color: #008CBA; 
+}
+
+.tool-btn.active { 
+    border: 2px solid #fff; 
+}
+
+.select-btn {
+    background-color: #3f51b5;
+}
+
+.select-btn.active {
+    border: 2px solid #fff;
+    transform: scale(1.05);
+}
+
+.paint-btn { 
+    background-color: #9c27b0; 
+}
+
+.paint-btn.active { 
+    border: 2px solid #fff; 
+}
+
+.pen-btn { 
+    background-color: #ff5722; 
+}
+
+.pen-btn.active { 
+    border: 2px solid #fff; 
+    transform: scale(1.05); 
+}
+
+.danger-btn { 
+    background-color: #f44336; 
+}
+
+.history-btn { 
+    background-color: #444; 
+    padding: 5px 8px; 
+    font-size: 14px; 
+    border-radius: 4px;
+}
+
+.history-btn:hover { 
+    background-color: #666;
+}
+
+.cutter-btn { 
+    background-color: #e91e63; 
+}
+
+.cutter-btn.active { 
+    border: 2px solid #fff; 
+    background-color: #c2185b; 
+}
+
+#add-line.active { 
+    border: 2px solid #fff; 
+    transform: scale(1.05); 
+}
+
+#btn-execute-cut {
+    background-color: #ff5722; 
+    display: none; 
+    box-shadow: 0 0 10px rgba(255, 87, 34, 0.5);
+    animation: pulse 1.5s infinite;
+}
+
+/* CUSTOM CONTEXT MENU */
+#context-menu {
+    position: fixed; 
+    background: #222; 
+    border: 1px solid #555;
+    border-radius: 6px; 
+    padding: 5px 0; 
+    display: none; 
+    z-index: 1000;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5); 
+    width: 150px;
+}
+
+.context-item {
+    padding: 10px 20px; 
+    cursor: pointer; 
+    color: #fff; 
+    font-size: 14px; 
+    transition: 0.1s;
+}
+
+.context-item:hover { 
+    background: #008CBA; 
+}
+
+.context-divider { 
+    height: 1px; 
+    background: #444; 
+    margin: 4px 0; 
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
