@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Workspace - Front-Face Only Coloring in Parallel Snap Mode</title>
+    <title>3D Workspace - Corrected Arcball Rotation</title>
     
     <link rel="stylesheet" href="style.css">
 
@@ -304,7 +304,12 @@
                     if (this.state === 0) {
                         const angle = Math.acos(Math.min(1.0, this.lastScreenVec.dot(currScreenVec))) * this.rotateSpeed;
                         if (angle > 0.0001) {
-                            const camAxis = new THREE.Vector3().crossVectors(this.lastScreenVec, currScreenVec).normalize();
+                            
+                            // 🐛 BUG FIX: Reversed the Cross Product Vectors here!
+                            // This ensures the camera orbits in the correct phase so the 
+                            // object visually follows your mouse drag like a real trackball.
+                            const camAxis = new THREE.Vector3().crossVectors(currScreenVec, this.lastScreenVec).normalize();
+                            
                             const worldAxis = camAxis.clone().transformDirection(this.camera.matrixWorld);
 
                             const rotQuat = new THREE.Quaternion().setFromAxisAngle(worldAxis, angle);
@@ -457,13 +462,11 @@
         const paletteBoxes = document.querySelectorAll('.palette-box');
         let activePaletteBox = paletteBoxes[0];
 
-        // Helper function that selectively paints visible front faces when snapped parallel
         function paintObjectColor(obj, newCol) {
             if (obj.isCutter || !obj.geometry || !obj.geometry.attributes.color) return;
             const geom = obj.geometry;
             const colorAttr = geom.attributes.color;
 
-            // When locked to an orthogonal/parallel face, color ONLY the triangle facing camera
             if (arcballControls.isLockedParallel && geom.index) {
                 const posAttr = geom.attributes.position;
                 const p1 = new THREE.Vector3(), p2 = new THREE.Vector3(), p3 = new THREE.Vector3();
@@ -481,7 +484,6 @@
                     cb.subVectors(p3, p2); ab.subVectors(p1, p2);
                     const triWorldNormal = cb.cross(ab).normalize();
 
-                    // If triangle normal directly opposes camera view direction (pointing at camera)
                     if (triWorldNormal.dot(camDir) < -0.85) {
                         colorAttr.setXYZ(a, newCol.r, newCol.g, newCol.b);
                         colorAttr.setXYZ(b, newCol.r, newCol.g, newCol.b);
@@ -489,7 +491,6 @@
                     }
                 }
             } else {
-                // Normal 3D orbit view: paint all vertices of the object
                 for (let i = 0; i < colorAttr.count; i++) {
                     colorAttr.setXYZ(i, newCol.r, newCol.g, newCol.b);
                 }
